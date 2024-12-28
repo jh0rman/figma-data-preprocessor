@@ -6,9 +6,10 @@ export class FigmaFileParser {
     const canvasNodes = this.file.document.children || []
     this.rootNodes = canvasNodes[0].children || []
     this.prototypeStartNodeID = canvasNodes[1].prototypeStartNodeID
-    if (!this.prototypeStartNodeID) {
-      throw new Error('Prototype start node ID not found')
-    }
+  }
+
+  getPrototypeStartNodeID() {
+    return this.prototypeStartNodeID
   }
 
   cleanData() {

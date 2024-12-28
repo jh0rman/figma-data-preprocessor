@@ -9,8 +9,9 @@ export class FigmaAPI {
     }
   }
 
-  async getFile(fileKey: string) {
-    const response = await fetch(`${this.BASE_URL}/files/${fileKey}`, {
+  async getFile(fileKey: string, params: Record<string, string> = {}) {
+    const urlParams = new URLSearchParams(params)
+    const response = await fetch(`${this.BASE_URL}/files/${fileKey}?${urlParams}`, {
       headers: this.FIGMA_HEADERS
     })
     return response.json()
