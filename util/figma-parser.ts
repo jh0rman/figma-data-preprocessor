@@ -42,49 +42,53 @@ export class FigmaParser {
   }
 
   parseNodes(): any[] {
-    return this.rootNodes.map((node) => this.parseNode(node)).filter(Boolean);
+    return this.rootNodes.map((node) => this.parseNode(node)).filter(Boolean)
   }
 
-  private parseNode(node: Record<string, any>): any | null {
-    let element: Record<string, any> = {};
+  parseNode(node: Record<string, any>): any | null {
+    let element: Record<string, any> = {}
 
     switch (node.type) {
-      case "TEXT":
-        element = {
-          type: "text",
-          content: node.characters,
-          style: node.style,
-        };
-        break;
+      case 'FRAME':
+        element = this.extractFrameData(node)
+        break
 
-      case "FRAME":
-        element = this.extractFrameData(node);
-        break;
-
-      case "GROUP":
+      case 'GROUP':
         element = {
-          type: "container",
+          type: 'container',
           name: node.name,
           children: node.children?.map((child: any) => this.parseNode(child)).filter(Boolean) || [],
-        };
-        break;
+        }
+        break
 
-      case "RECTANGLE":
+      case 'RECTANGLE':
         element = {
-          type: "box",
+          type: 'box',
           backgroundColor: node.backgroundColor,
-        };
-        break;
+        }
+        break
+
+      case 'INSTANCE':
+        element = this.extractInstanceData(node)
+        break
+
+      case 'TEXT':
+        element = this.extractTextData(node)
+        break
+
+      default:
+        console.warn(`Unknown node type: ${node.type}`)
+        break
     }
 
-    return Object.keys(element).length > 0 ? element : null;
+    return Object.keys(element).length > 0 ? element : null
   }
 
   private extractFrameData(node: Record<string, any>): any {
     return {
-      type: "frame",
       id: node.id,
       name: node.name,
+      type: node.type,
       layoutMode: node.layoutMode,
       primaryAxisSizingMode: node.primaryAxisSizingMode,
       counterAxisSizingMode: node.counterAxisSizingMode,
@@ -102,6 +106,54 @@ export class FigmaParser {
       backgroundColor: node.backgroundColor,
       overflowDirection: node.overflowDirection,
       children: node.children?.map((child: any) => this.parseNode(child)).filter(Boolean) || [],
-    };
+    }
+  }
+
+  private extractInstanceData(node: Record<string, any>): any {
+    return {
+      id: node.id,
+      name: node.name,
+      type: node.type,
+      componentId: node.componentId,
+      componentProperties: node.componentProperties || {},
+      boundVariables: node.boundVariables || {},
+      overrides: node.overrides || [],
+      layoutMode: node.layoutMode,
+      padding: {
+        top: node.paddingTop,
+        right: node.paddingRight,
+        bottom: node.paddingBottom,
+        left: node.paddingLeft,
+      },
+      itemSpacing: node.itemSpacing,
+      constraints: node.constraints,
+      size: node.absoluteBoundingBox
+        ? {
+            width: node.absoluteBoundingBox.width,
+            height: node.absoluteBoundingBox.height,
+          }
+        : null,
+      children: node.children?.map((child: any) => this.parseNode(child)).filter(Boolean) || [],
+    }
+  }
+
+  private extractTextData(node: Record<string, any>): any {
+    return {
+      type: node.type,
+      content: node.characters,
+      style: {
+        fontFamily: node.style?.fontFamily,
+        fontStyle: node.style?.fontStyle,
+        fontWeight: node.style?.fontWeight,
+        fontSize: node.style?.fontSize,
+        textAlignHorizontal: node.style?.textAlignHorizontal,
+        textAlignVertical: node.style?.textAlignVertical,
+        letterSpacing: node.style?.letterSpacing,
+        lineHeight: {
+          px: node.style?.lineHeightPx,
+          unit: node.style?.lineHeightUnit,
+        },
+      },
+    }
   }
 }
