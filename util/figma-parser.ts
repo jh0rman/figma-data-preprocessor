@@ -1,4 +1,6 @@
 export class FigmaParser {
+  private readonly DEFAULT_FONT = 'Inter'
+
   rootNodes: Record<string, any>[]
   prototypeStartNodeID: string | undefined
 
@@ -53,21 +55,6 @@ export class FigmaParser {
         element = this.extractFrameData(node)
         break
 
-      case 'GROUP':
-        element = {
-          type: 'container',
-          name: node.name,
-          children: node.children?.map((child: any) => this.parseNode(child)).filter(Boolean) || [],
-        }
-        break
-
-      case 'RECTANGLE':
-        element = {
-          type: 'box',
-          backgroundColor: node.backgroundColor,
-        }
-        break
-
       case 'INSTANCE':
         element = this.extractInstanceData(node)
         break
@@ -85,30 +72,114 @@ export class FigmaParser {
   }
 
   private extractFrameData(node: Record<string, any>): any {
+    const styles = this.extractFrameStyles(node)
+
+    if (node.visible === false) {
+      console.log('Data node', node.name)
+    }
+    
     return {
-      id: node.id,
-      name: node.name,
-      type: node.type,
-      layoutMode: node.layoutMode,
-      primaryAxisSizingMode: node.primaryAxisSizingMode,
-      counterAxisSizingMode: node.counterAxisSizingMode,
-      counterAxisAlignItems: node.counterAxisAlignItems,
-      layoutAlign: node.layoutAlign,
-      layoutGrow: node.layoutGrow,
-      size: node.absoluteBoundingBox
-        ? {
-            width: node.absoluteBoundingBox.width,
-            height: node.absoluteBoundingBox.height,
-          }
-        : null,
-      constraints: node.constraints,
-      clipsContent: node.clipsContent,
-      backgroundColor: node.backgroundColor,
-      overflowDirection: node.overflowDirection,
+      originalName: node.name,
+      name: 'div',
+      type: 'HTML',
+      styles,
       children: node.children?.map((child: any) => this.parseNode(child)).filter(Boolean) || [],
     }
   }
 
+  private extractFrameStyles(node: Record<string, any>): Record<string, any> {
+    const styles: Record<string, any> = {}
+
+    // Layout mode
+    if (node.layoutMode) {
+      styles.display = node.layoutMode === 'GRID' ? 'grid' : 'flex'
+      styles.flexDirection = node.layoutMode === 'VERTICAL' ? 'column' : 'row'
+    }
+
+    // Sizing
+    if (node.primaryAxisSizingMode === 'FIXED') {
+      styles.width = node.size?.width ? `${node.size.width}px` : 'auto'
+    }
+    if (node.counterAxisSizingMode === 'FIXED') {
+      styles.height = node.size?.height ? `${node.size.height}px` : 'auto'
+    }
+
+    // Alignment
+    if (node.layoutAlign) {
+      switch (node.layoutAlign) {
+        case 'STRETCH':
+          styles.alignSelf = 'stretch'
+          break
+        case 'INHERIT':
+          styles.alignSelf = 'inherit'
+          break
+        case 'MIN':
+          styles.alignSelf = 'flex-start'
+          break
+        case 'MAX':
+          styles.alignSelf = 'flex-end'
+          break
+        case 'CENTER':
+          styles.alignSelf = 'center'
+          break
+      }
+    }
+
+    // Grow
+    if (node.layoutGrow !== undefined) {
+      styles.flexGrow = node.layoutGrow
+    }
+
+    // Background
+    if (node.backgroundColor) {
+      const { r, g, b, a } = node.backgroundColor
+      styles.backgroundColor = `rgba(${r * 255}, ${g * 255}, ${b * 255}, ${a})`
+    }
+
+    // Clipping
+    if (node.clipsContent) {
+      styles.overflow = 'hidden'
+    }
+
+    // Border radius
+    if (node.cornerRadius) {
+      styles.borderRadius = `${node.cornerRadius}px`
+    }
+
+    // Strokes (borders)
+    if (node.strokes && node.strokes.length > 0) {
+      const stroke = node.strokes[0]
+      if (stroke.type === 'SOLID') {
+        const { r, g, b, a } = stroke.color
+        styles.border = `1px solid rgba(${r * 255}, ${g * 255}, ${b * 255}, ${a})`
+      }
+    }
+
+    // Effects (shadows)
+    if (node.effects && node.effects.length > 0) {
+      const shadows = node.effects
+        .filter((effect: any) => effect.type === 'DROP_SHADOW')
+        .map((effect: any) => {
+          const { r, g, b, a } = effect.color
+          return `${effect.offset.x}px ${effect.offset.y}px ${effect.radius}px rgba(${r * 255}, ${g * 255}, ${b * 255}, ${a})`
+        })
+      if (shadows.length > 0) {
+        styles.boxShadow = shadows.join(', ')
+      }
+    }
+
+    // Padding
+    if (node.paddingTop || node.paddingRight || node.paddingBottom || node.paddingLeft) {
+      styles.padding = `${node.paddingTop || 0}px ${node.paddingRight || 0}px ${node.paddingBottom || 0}px ${node.paddingLeft || 0}px`
+    }
+
+    // Gap (itemSpacing)
+    if (node.itemSpacing) {
+      styles.gap = `${node.itemSpacing}px`
+    }
+
+    return styles
+  }
   private extractInstanceData(node: Record<string, any>): any {
     return {
       id: node.id,
