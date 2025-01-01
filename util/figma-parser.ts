@@ -180,51 +180,323 @@ export class FigmaParser {
 
     return styles
   }
+
   private extractInstanceData(node: Record<string, any>): any {
+    if (node.name === 'Button') {
+      return this.extractButtonData(node)
+    } else if (node.name === 'Page heading') {
+      return this.extractPageHeadingData(node)
+    } else if (node.name === 'Empty-state') {
+      return this.extractEmptyStateData(node)
+    } else if (node.name === 'Modal V2 (NEW)') {
+      return this.extractModalData(node)
+    } else if (node.name === 'Dropdown') {
+      return this.extractDropdownData(node)
+    } else {
+      console.log('Instance node', node.name)
+      // Tratar como FRAME si no es un componente identificado
+      const styles = this.extractFrameStyles(node)
+      
+      return {
+        name: 'div',
+        type: 'HTML',
+        styles,
+        children: node.children?.map((child: any) => this.parseNode(child)).filter(Boolean) || [],
+      }
+    }
+  }
+
+  private findNodeByName(nodes: any[], nodeName: string): any[] | undefined {
+    for (const node of nodes) {
+      if (node.name === nodeName) {
+        return node.children || []
+      }
+      if (node.children) {
+        const result = this.findNodeByName(node.children, nodeName)
+        if (result) return result
+      }
+    }
+    return undefined
+  }
+
+  private findNodeByComponentId(nodes: any[], nodeId: string): any | undefined {
+    for (const node of nodes) {
+      if (node.componentId === nodeId) {
+        return node
+      }
+      if (node.children) {
+        const result = this.findNodeByComponentId(node.children, nodeId)
+        if (result) return result
+      }
+    }
+    return undefined
+  }
+
+  private extractPageHeadingData(node: Record<string, any>): any {
+    const props = node.componentProperties || {}
+
+    const actionsChildren = this.findNodeByName(node.children || [], '.buttons-heading')    
+
     return {
-      id: node.id,
-      name: node.name,
-      type: node.type,
-      componentId: node.componentId,
-      componentProperties: node.componentProperties || {},
-      boundVariables: node.boundVariables || {},
-      overrides: node.overrides || [],
-      layoutMode: node.layoutMode,
-      padding: {
-        top: node.paddingTop,
-        right: node.paddingRight,
-        bottom: node.paddingBottom,
-        left: node.paddingLeft,
+      name: 'SPageHeading',
+      type: 'COMPONENT',
+      props: {
+        title: props['Title:#3530:14']?.value,
+        description: props['Description#3530:11']?.value ? props['Description:#3530:13']?.value : undefined,
+        breadcrumbs: props['Breadcrumbs#3530:12']?.value ? [] : undefined // todo: handle breadcrumbs
       },
-      itemSpacing: node.itemSpacing,
-      constraints: node.constraints,
-      size: node.absoluteBoundingBox
-        ? {
-            width: node.absoluteBoundingBox.width,
-            height: node.absoluteBoundingBox.height,
-          }
-        : null,
-      children: node.children?.map((child: any) => this.parseNode(child)).filter(Boolean) || [],
+      slots: {
+        actions: actionsChildren?.map((child: any) => this.parseNode(child)).filter(Boolean) || []
+      },
+    }
+  }
+
+  private extractButtonData(node: Record<string, any>): any {
+    const props = node.componentProperties || {}
+
+    const emphasisMap: Record<string, string> = {
+      'Filled': 'filled',
+      'Subtle': 'subtle',
+      'Outline': 'outline',
+      'Ghost': 'text'
+    }
+
+    const typeMap: Record<string, string> = {
+      'Default': 'default',
+      'Destructive': 'destructive',
+      'Contrast': 'reversed'
+    }
+    
+    const sizeMap: Record<string, string> = {
+      'S': 'small',
+      'M': 'medium',
+      'L': 'large'
+    }
+
+    const iconLeftNode = props['Leading Icon#4089:5']?.value 
+      ? this.findNodeByComponentId(node.children || [], props['Change leading#4089:18']?.value)
+      : undefined
+
+    const iconRightNode = props['Trailing Icon#4089:31']?.value 
+      ? this.findNodeByComponentId(node.children || [], props['Change trailing#4089:44']?.value)
+      : undefined
+      // iconLeft: props['Leading Icon#4089:5']?.value ? props['Change leading#4089:18']?.value : undefined,
+      // iconRight: props['Trailing Icon#4089:31']?.value ? props['Change trailing#4089:44']?.value : undefined,
+    return {
+      name: 'SButton',
+      type: 'COMPONENT',
+      props: {
+        label: props['Label#4090:4']?.value,
+        emphasis: emphasisMap[props['Emphasis']?.value],
+        type: typeMap[props['Type']?.value],
+        size: sizeMap[props['Size']?.value],
+        iconLeft: iconLeftNode?.name,
+        iconRight: iconRightNode?.name,
+        disabled: props['State']?.value === 'Disabled',
+        loading: props['State']?.value === 'Loading'
+      }
     }
   }
 
   private extractTextData(node: Record<string, any>): any {
+    const style = node.style || {}
+    const baseStyles = {
+      fontFamily: style.fontFamily !== this.DEFAULT_FONT ? style.fontFamily : undefined,
+      fontWeight: style.fontWeight,
+      fontSize: `${style.fontSize}px`,
+      textAlign: style.textAlignHorizontal?.toLowerCase(),
+      letterSpacing: `${style.letterSpacing}px`,
+      lineHeight: style.lineHeightUnit === 'PIXELS' 
+        ? `${style.lineHeightPx}px` 
+        : `${style.lineHeightPercent}%`
+    }
+
+    // Si no hay overrides, retornar texto simple
+    if (!node.characterStyleOverrides || !node.styleOverrideTable) {
+      return {
+        name: 'p',
+        type: 'HTML',
+        styles: baseStyles,
+        content: node.characters
+      }
+    }
+
+    // Agrupar caracteres por estilo
+    const textGroups: { style: any, text: string }[] = []
+    let currentStyle = '0' // Estilo base
+    let currentText = ''
+
+    node.characters.split('').forEach((char: string, index: number) => {
+      const styleIndex = node.characterStyleOverrides[index]
+      const styleKey = styleIndex ? styleIndex.toString() : '0'
+      
+      if (styleKey !== currentStyle) {
+        if (currentText) {
+          textGroups.push({
+            style: currentStyle === '0' ? baseStyles : this.getStyleFromOverride(node.styleOverrideTable[currentStyle]),
+            text: currentText
+          })
+        }
+        currentStyle = styleKey
+        currentText = char
+      } else {
+        currentText += char
+      }
+    })
+
+    // Agregar el último grupo
+    if (currentText) {
+      textGroups.push({
+        style: currentStyle === '0' ? baseStyles : this.getStyleFromOverride(node.styleOverrideTable[currentStyle]),
+        text: currentText
+      })
+    }
+
+    // Si solo hay un grupo de texto, retornar estructura simple
+    if (textGroups.length === 1) {
+      return {
+        name: 'p',
+        type: 'HTML',
+        styles: textGroups[0].style,
+        content: textGroups[0].text
+      }
+    }
+
+    // Si hay múltiples grupos, retornar estructura con children
     return {
-      type: node.type,
-      content: node.characters,
-      style: {
-        fontFamily: node.style?.fontFamily,
-        fontStyle: node.style?.fontStyle,
-        fontWeight: node.style?.fontWeight,
-        fontSize: node.style?.fontSize,
-        textAlignHorizontal: node.style?.textAlignHorizontal,
-        textAlignVertical: node.style?.textAlignVertical,
-        letterSpacing: node.style?.letterSpacing,
-        lineHeight: {
-          px: node.style?.lineHeightPx,
-          unit: node.style?.lineHeightUnit,
-        },
+      name: 'p',
+      type: 'HTML',
+      styles: {
+        display: 'inline-flex',
+        alignItems: 'baseline',
       },
+      children: textGroups.map(group => ({
+        type: 'span',
+        styles: group.style,
+        content: group.text
+      }))
+    }
+  }
+
+  private getStyleFromOverride(override: any): Record<string, any> {
+    if (!override) return {}
+
+    const style: Record<string, any> = {
+      fontFamily: override.fontFamily !== this.DEFAULT_FONT ? override.fontFamily : undefined,
+      fontWeight: override.fontWeight,
+      fontSize: `${override.fontSize}px`,
+      letterSpacing: `${override.letterSpacing}px`,
+      lineHeight: override.lineHeightUnit === 'PIXELS' 
+        ? `${override.lineHeightPx}px` 
+        : `${override.lineHeightPercent}%`
+    }
+
+    // Agregar color si existe
+    if (override.fills?.[0]?.color) {
+      const { r, g, b, a } = override.fills[0].color
+      style.color = `rgba(${r * 255}, ${g * 255}, ${b * 255}, ${a})`
+    }
+
+    return style
+  }
+
+  private extractEmptyStateData(node: Record<string, any>): any {
+    const props = node.componentProperties || {}
+    
+    const actionButton = this.findNodeByName(node.children || [], '.empty-state-actions')?.[0]
+    const actionLabel = actionButton?.componentProperties?.['Label#4090:4']?.value
+    const generalIcon = props['Icon#4470:25']?.value
+      ? this.findNodeByComponentId(node.children || [], props['Icon:#4470:20']?.value)
+      : undefined
+
+    const onClickInteraction = actionButton?.interactions?.find(
+      (interaction: any) => interaction.trigger?.type === 'ON_CLICK'
+    )
+    const destinationId = onClickInteraction?.actions?.[0]?.destinationId
+    const destinationNode = destinationId ? this.getNodeByID(destinationId) : undefined
+
+    return {
+      name: 'SEmptyState',
+      type: 'COMPONENT',
+      props: {
+        title: props['Title#4470:0']?.value,
+        description: props['Description#4470:5']?.value ? props['Description:#4470:10']?.value : undefined,
+        generalIcon: generalIcon?.name,
+        action: props['CTA#4470:15']?.value ? {
+          label: actionLabel,
+          icon: undefined, // todo: handle icon
+        } : undefined,
+        isOnComponent: props['type']?.value === 'Subtle'
+      },
+      events: {
+        clickAction: destinationNode ? this.parseNode(destinationNode) : undefined
+      }
+    }
+  }
+
+  private extractModalData(node: Record<string, any>): any {
+    const props = node.componentProperties || {}
+    
+    const defaultSlot = this.findNodeByName(node.children || [], 'Slot')
+    const footerLeftContent = this.findNodeByName(node.children || [], 'Left content')
+    const footerRightContent = this.findNodeByName(node.children || [], 'Right content')
+
+    return {
+      name: 'SModal',
+      type: 'COMPONENT',
+      props: {
+        title: props['Title#9821:8']?.value,
+        description: props['Description#9821:6']?.value ? props['Description:#10037:6']?.value : undefined,
+        size: props['Size']?.value?.toLowerCase(),
+        footer: props['Footer#9821:7']?.value,
+        showCloseIcon: props['Close button#9821:9']?.value,
+        backBtn: props['Back button#9821:10']?.value,
+        cancelText: footerRightContent?.[0]?.componentProperties?.['Label#4090:4']?.value,
+        successText: footerRightContent?.[1]?.componentProperties?.['Label#4090:4']?.value,
+      },
+      slots: {
+        default: defaultSlot?.map((child: any) => this.parseNode(child)).filter(Boolean) || [],
+        'footer-left-content': footerLeftContent?.map((child: any) => this.parseNode(child)).filter(Boolean) || []
+      }
+    }
+  }
+
+  private extractDropdownData(node: Record<string, any>): any {
+    const props = node.componentProperties || {}
+    
+    const sizeMap: Record<string, string> = {
+      'S': 'small',
+      'M': 'medium',
+      'L': 'large'
+    }
+
+    return {
+      name: 'SDropdown',
+      type: 'COMPONENT',
+      props: {
+        label: props['Label#8297:0']?.value ? props['Label:#6833:585']?.value : undefined,
+        placeholder: props['Placeholder:#6833:582']?.value,
+        supportiveText: props['Supportive text#6833:588']?.value ? props['Supportive text:#6833:584']?.value : undefined,
+        size: sizeMap[props['Size']?.value],
+        disabled: props['State']?.value === 'Disabled',
+        loading: props['State']?.value === 'Loading',
+        success: props['State']?.value === 'Success',
+        error: props['State']?.value === 'Error' ? 'Error message' : undefined, // todo: handle error
+        search: props['Search#9821:11']?.value,
+        multiple: props['Multiple#9821:12']?.value,
+        options: [], // Las opciones se deben pasar desde el componente padre
+        labelIcon: props['Label icon#9821:13']?.value ? 'info' : undefined,
+        supportiveIcon: props['Supportive icon#9821:14']?.value ? 'info' : undefined,
+        canDeselect: true,
+        markType:
+          props['Mark required#6833:577']?.value
+            ? 'required'
+            : props['Mark Optional#6833:583']?.value
+              ? 'optional'
+              : undefined,
+        magic: props['State']?.value === 'Magic Loading',
+        readonly: props['State']?.value === 'Read only',
+      }
     }
   }
 }
