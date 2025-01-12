@@ -1,13 +1,93 @@
+import colors from 'tailwindcss/colors'
+
+// Extender colors con los colores de Simón
+const customColors = {
+  'sm-primary': {
+    '50': '#e9fafa',
+    '100': '#cff2f1',
+    '200': '#b6ecea',
+    '300': '#9be4e0',
+    '400': '#72d5d1',
+    '500': '#30bbb7',
+    '600': '#30aba9',
+    '700': '#299e9c',
+    '800': '#208d8d',
+    '900': '#1a7e7f'
+  }
+} as const
+
+const extendedColors = {
+  ...colors,
+  ...customColors
+}
+
 export class FigmaParser {
   private readonly DEFAULT_FONT = 'Inter'
+  private readonly colorTokenMap: Map<string, { name: string, shade: string }> = new Map()
+  private readonly DEPRECATED_COLORS = ['lightBlue', 'warmGray', 'trueGray', 'coolGray', 'blueGray']
 
+  document: Record<string, any>
   rootNodes: Record<string, any>[]
   prototypeStartNodeID: string | undefined
 
   constructor(private file: Record<string, any>) {
-    const canvasNodes = this.file.document.children || []
+    this.initializeColorTokenMap()
+    
+    this.document = this.filterVisibleNodes(this.file.document)
+    const canvasNodes = this.document.children || []
     this.rootNodes = canvasNodes[0]?.children || []
     this.prototypeStartNodeID = canvasNodes[1]?.prototypeStartNodeID
+  }
+
+  private initializeColorTokenMap() {
+    const colorNames = Object.keys(extendedColors)
+      .filter(name => 
+        !this.DEPRECATED_COLORS.includes(name) &&
+        typeof extendedColors[name as keyof typeof extendedColors] === 'object' &&
+        !Array.isArray(extendedColors[name as keyof typeof extendedColors])
+      )
+
+    colorNames.forEach(name => {
+      const colorShades = extendedColors[name as keyof typeof extendedColors]
+      Object.entries(colorShades).forEach(([shade, hexColor]) => {
+        if (typeof hexColor === 'string') {
+          const rgb = this.hexToRgb(hexColor)
+          if (rgb) {
+            const key = this.rgbToKey(rgb)
+            this.colorTokenMap.set(key, { name, shade })
+          }
+        }
+      })
+    })
+  }
+
+  private hexToRgb(hex: string): { r: number, g: number, b: number } | null {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+    return result ? {
+      r: parseInt(result[1], 16) / 255,
+      g: parseInt(result[2], 16) / 255,
+      b: parseInt(result[3], 16) / 255
+    } : null
+  }
+
+  private rgbToKey(color: { r: number, g: number, b: number }): string {
+    return `${Math.round(color.r * 255)},${Math.round(color.g * 255)},${Math.round(color.b * 255)}`
+  }
+
+  private findExactColorToken(color: { r: number, g: number, b: number, a?: number }): string | null {
+    // Manejar colores especiales primero
+    if (color.a === 0) return 'transparent'
+    
+    const rgb = this.rgbToKey(color)
+    
+    // Manejar black y white
+    if (rgb === '0,0,0') return 'black'
+    if (rgb === '255,255,255') return 'white'
+
+    // Buscar en el mapa de colores personalizados
+    return this.colorTokenMap.has(rgb) 
+      ? `${this.colorTokenMap.get(rgb)!.name}-${this.colorTokenMap.get(rgb)!.shade}`
+      : null
   }
 
   getStartNodeID(): string | undefined {
@@ -15,7 +95,7 @@ export class FigmaParser {
   }
 
   getNodeByID(nodeId: string): any | null {
-    return this.searchNode(this.file.document, nodeId)
+    return this.searchNode(this.document, nodeId)
   }
 
   private searchNode(node: any, nodeId: string): any | null {
@@ -73,10 +153,6 @@ export class FigmaParser {
 
   private extractFrameData(node: Record<string, any>): any {
     const styles = this.extractFrameStyles(node)
-
-    if (node.visible === false) {
-      console.log('Data node', node.name)
-    }
     
     return {
       originalName: node.name,
@@ -132,8 +208,17 @@ export class FigmaParser {
 
     // Background
     if (node.backgroundColor) {
-      const { r, g, b, a } = node.backgroundColor
-      styles.backgroundColor = `rgba(${r * 255}, ${g * 255}, ${b * 255}, ${a})`
+      const colorToken = this.findExactColorToken(node.backgroundColor)
+      if (colorToken) {
+        if (colorToken !== 'transparent') {
+          styles.backgroundColor = colorToken
+        }
+      } else {
+        const { r, g, b, a } = node.backgroundColor
+        if (a !== 0) {
+          styles.backgroundColor = `rgba(${r * 255}, ${g * 255}, ${b * 255}, ${a})`
+        }
+      }
     }
 
     // Clipping
@@ -150,8 +235,13 @@ export class FigmaParser {
     if (node.strokes && node.strokes.length > 0) {
       const stroke = node.strokes[0]
       if (stroke.type === 'SOLID') {
-        const { r, g, b, a } = stroke.color
-        styles.border = `1px solid rgba(${r * 255}, ${g * 255}, ${b * 255}, ${a})`
+        const colorToken = this.findExactColorToken(stroke.color)
+        if (colorToken) {
+          styles.border = `1px solid ${colorToken}`
+        } else {
+          const { r, g, b, a } = stroke.color
+          styles.border = `1px solid rgba(${r * 255}, ${g * 255}, ${b * 255}, ${a})`
+        }
       }
     }
 
@@ -160,8 +250,13 @@ export class FigmaParser {
       const shadows = node.effects
         .filter((effect: any) => effect.type === 'DROP_SHADOW')
         .map((effect: any) => {
-          const { r, g, b, a } = effect.color
-          return `${effect.offset.x}px ${effect.offset.y}px ${effect.radius}px rgba(${r * 255}, ${g * 255}, ${b * 255}, ${a})`
+          const colorToken = this.findExactColorToken(effect.color)
+          if (colorToken) {
+            return `${effect.offset.x}px ${effect.offset.y}px ${effect.radius}px ${colorToken}`
+          } else {
+            const { r, g, b, a } = effect.color
+            return `${effect.offset.x}px ${effect.offset.y}px ${effect.radius}px rgba(${r * 255}, ${g * 255}, ${b * 255}, ${a})`
+          }
         })
       if (shadows.length > 0) {
         styles.boxShadow = shadows.join(', ')
@@ -300,7 +395,9 @@ export class FigmaParser {
 
   private extractTextData(node: Record<string, any>): any {
     const style = node.style || {}
-    const baseStyles = {
+    const fills = node.fills || []
+    
+    const styles: Record<string, any> = {
       fontFamily: style.fontFamily !== this.DEFAULT_FONT ? style.fontFamily : undefined,
       fontWeight: style.fontWeight,
       fontSize: `${style.fontSize}px`,
@@ -311,93 +408,23 @@ export class FigmaParser {
         : `${style.lineHeightPercent}%`
     }
 
-    // Si no hay overrides, retornar texto simple
-    if (!node.characterStyleOverrides || !node.styleOverrideTable) {
-      return {
-        name: 'p',
-        type: 'HTML',
-        styles: baseStyles,
-        content: node.characters
-      }
-    }
-
-    // Agrupar caracteres por estilo
-    const textGroups: { style: any, text: string }[] = []
-    let currentStyle = '0' // Estilo base
-    let currentText = ''
-
-    node.characters.split('').forEach((char: string, index: number) => {
-      const styleIndex = node.characterStyleOverrides[index]
-      const styleKey = styleIndex ? styleIndex.toString() : '0'
-      
-      if (styleKey !== currentStyle) {
-        if (currentText) {
-          textGroups.push({
-            style: currentStyle === '0' ? baseStyles : this.getStyleFromOverride(node.styleOverrideTable[currentStyle]),
-            text: currentText
-          })
-        }
-        currentStyle = styleKey
-        currentText = char
+    // Agregar color si existe
+    if (fills[0]?.color) {
+      const colorToken = this.findExactColorToken(fills[0].color)
+      if (colorToken) {
+        styles.color = colorToken
       } else {
-        currentText += char
-      }
-    })
-
-    // Agregar el último grupo
-    if (currentText) {
-      textGroups.push({
-        style: currentStyle === '0' ? baseStyles : this.getStyleFromOverride(node.styleOverrideTable[currentStyle]),
-        text: currentText
-      })
-    }
-
-    // Si solo hay un grupo de texto, retornar estructura simple
-    if (textGroups.length === 1) {
-      return {
-        name: 'p',
-        type: 'HTML',
-        styles: textGroups[0].style,
-        content: textGroups[0].text
+        const { r, g, b, a } = fills[0].color
+        styles.color = `rgba(${r * 255}, ${g * 255}, ${b * 255}, ${a})`
       }
     }
 
-    // Si hay múltiples grupos, retornar estructura con children
     return {
       name: 'p',
       type: 'HTML',
-      styles: {
-        display: 'inline-flex',
-        alignItems: 'baseline',
-      },
-      children: textGroups.map(group => ({
-        type: 'span',
-        styles: group.style,
-        content: group.text
-      }))
+      styles,
+      content: node.characters
     }
-  }
-
-  private getStyleFromOverride(override: any): Record<string, any> {
-    if (!override) return {}
-
-    const style: Record<string, any> = {
-      fontFamily: override.fontFamily !== this.DEFAULT_FONT ? override.fontFamily : undefined,
-      fontWeight: override.fontWeight,
-      fontSize: `${override.fontSize}px`,
-      letterSpacing: `${override.letterSpacing}px`,
-      lineHeight: override.lineHeightUnit === 'PIXELS' 
-        ? `${override.lineHeightPx}px` 
-        : `${override.lineHeightPercent}%`
-    }
-
-    // Agregar color si existe
-    if (override.fills?.[0]?.color) {
-      const { r, g, b, a } = override.fills[0].color
-      style.color = `rgba(${r * 255}, ${g * 255}, ${b * 255}, ${a})`
-    }
-
-    return style
   }
 
   private extractEmptyStateData(node: Record<string, any>): any {
