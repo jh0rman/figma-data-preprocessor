@@ -287,6 +287,8 @@ export class FigmaParser {
       return this.extractModalData(node)
     } else if (node.name === 'Dropdown') {
       return this.extractDropdownData(node)
+    } else if (node.name === 'Table') {
+      return this.extractTableData(node)
     } else {
       console.log('Instance node', node.name)
       // Tratar como FRAME si no es un componente identificado
@@ -301,10 +303,10 @@ export class FigmaParser {
     }
   }
 
-  private findNodeByName(nodes: any[], nodeName: string): any[] | undefined {
+  private findNodeByName(nodes: any[], nodeName: string): any | undefined {
     for (const node of nodes) {
       if (node.name === nodeName) {
-        return node.children || []
+        return node
       }
       if (node.children) {
         const result = this.findNodeByName(node.children, nodeName)
@@ -312,6 +314,21 @@ export class FigmaParser {
       }
     }
     return undefined
+  }
+
+  private findNodesByName(nodes: any[], nodeName: string): any[] {
+    let results: any[] = []
+    
+    for (const node of nodes) {
+      if (node.name === nodeName) {
+        results.push(node)
+      }
+      if (node.children) {
+        results = results.concat(this.findNodesByName(node.children, nodeName))
+      }
+    }
+    
+    return results
   }
 
   private findNodeByComponentId(nodes: any[], nodeId: string): any | undefined {
@@ -330,7 +347,7 @@ export class FigmaParser {
   private extractPageHeadingData(node: Record<string, any>): any {
     const props = node.componentProperties || {}
 
-    const actionsChildren = this.findNodeByName(node.children || [], '.buttons-heading')    
+    const actionsContainer = this.findNodeByName(node.children || [], '.buttons-heading')    
 
     return {
       name: 'SPageHeading',
@@ -341,7 +358,7 @@ export class FigmaParser {
         breadcrumbs: props['Breadcrumbs#3530:12']?.value ? [] : undefined // todo: handle breadcrumbs
       },
       slots: {
-        actions: actionsChildren?.map((child: any) => this.parseNode(child)).filter(Boolean) || []
+        actions: actionsContainer?.children?.map((child: any) => this.parseNode(child)).filter(Boolean) || []
       },
     }
   }
@@ -429,8 +446,8 @@ export class FigmaParser {
 
   private extractEmptyStateData(node: Record<string, any>): any {
     const props = node.componentProperties || {}
-    
-    const actionButton = this.findNodeByName(node.children || [], '.empty-state-actions')?.[0]
+
+    const actionButton = this.findNodeByName(node.children || [], '.empty-state-actions')?.children?.[0]
     const actionLabel = actionButton?.componentProperties?.['Label#4090:4']?.value
     const generalIcon = props['Icon#4470:25']?.value
       ? this.findNodeByComponentId(node.children || [], props['Icon:#4470:20']?.value)
@@ -464,9 +481,9 @@ export class FigmaParser {
   private extractModalData(node: Record<string, any>): any {
     const props = node.componentProperties || {}
     
-    const defaultSlot = this.findNodeByName(node.children || [], 'Slot')
-    const footerLeftContent = this.findNodeByName(node.children || [], 'Left content')
-    const footerRightContent = this.findNodeByName(node.children || [], 'Right content')
+    const defaultSlot = this.findNodeByName(node.children || [], 'Slot')?.children
+    const footerLeftContent = this.findNodeByName(node.children || [], 'Left content')?.children
+    const footerRightContent = this.findNodeByName(node.children || [], 'Right content')?.children
 
     return {
       name: 'SModal',
@@ -523,6 +540,59 @@ export class FigmaParser {
               : undefined,
         magic: props['State']?.value === 'Magic Loading',
         readonly: props['State']?.value === 'Read only',
+      }
+    }
+  }
+
+  private extractTableData(node: Record<string, any>): any {
+    const props = node.componentProperties || {}
+
+    // Extraer configuración de columnas del header
+    const headerContainer = this.findNodeByName(node.children || [], '.Table row header')?.children?.[0]
+    const headerCells = headerContainer?.children?.filter((child: any) => child.type === 'INSTANCE') || []
+
+    const columnConfig = headerCells.map((headerCell: any) => {
+      const cellProps = headerCell.componentProperties || {}
+      return {
+        name: headerCell.name,
+        label: cellProps['Text:#5000:0']?.value,
+        // filterable: cellProps['Sort']?.value !== 'None',
+        order: cellProps['Is sortable']?.value === 'True',
+        headerAlign: cellProps['Alignment']?.value?.toLowerCase(),
+        // bodyAlign: cellProps['Body align#9821:31']?.value?.toLowerCase(),
+      }
+    })
+
+    // Extraer datos de las filas
+    const tableRows = this.findNodesByName(node.children || [], '.Table row')
+    const rows = tableRows.map((row: any) => {
+      const rowData: Record<string, any> = {}
+      const cells = row.children?.[0]?.children?.filter((child: any) => child.type === 'INSTANCE') || []
+      
+      cells.forEach((cell: any) => {
+        const textContainer = this.findNodeByName(cell.children, 'text-container')
+        rowData[cell.name] = textContainer?.children?.[0].characters
+      })
+      return rowData
+    })
+
+    // Extraer información de paginación
+    const paginationContainer = this.findNodeByName(node.children || [], '.Pagination')
+    const paginationProps = paginationContainer?.componentProperties || {}
+
+    const toolbarContainer = this.findNodeByName(node.children || [], '.table-toolbar')
+    
+    return {
+      name: 'STable',
+      type: 'COMPONENT',
+      props: {
+        rows,
+        total: rows.length,
+        columnConfig,
+        paginationFullMode: paginationProps['Minimal']?.value === 'False',
+      },
+      slots: {
+        toolbar: toolbarContainer?.children?.map((child: any) => this.parseNode(child)).filter(Boolean) || [],
       }
     }
   }
