@@ -289,6 +289,8 @@ export class FigmaParser {
       return this.extractDropdownData(node)
     } else if (node.name === 'Table') {
       return this.extractTableData(node)
+    } else if (node.name === '.table-toolbar') {
+      return this.extractToolbarData(node)
     } else {
       console.log('Instance node', node.name)
       // Tratar como FRAME si no es un componente identificado
@@ -580,8 +582,6 @@ export class FigmaParser {
     const paginationContainer = this.findNodeByName(node.children || [], '.Pagination')
     const paginationProps = paginationContainer?.componentProperties || {}
 
-    const toolbarContainer = this.findNodeByName(node.children || [], '.table-toolbar')
-    
     return {
       name: 'STable',
       type: 'COMPONENT',
@@ -592,7 +592,25 @@ export class FigmaParser {
         paginationFullMode: paginationProps['Minimal']?.value === 'False',
       },
       slots: {
-        toolbar: toolbarContainer?.children?.map((child: any) => this.parseNode(child)).filter(Boolean) || [],
+        toolbar: [this.parseNode(node.children[0])],
+      }
+    }
+  }
+
+  private extractToolbarData(node: Record<string, any>): any {
+    const props = node.componentProperties || {}
+    
+    const leftContent = this.findNodeByName(node.children || [], 'Left content')
+
+    return {
+      name: 'SToolbar',
+      type: 'COMPONENT',
+      props: {
+        filters: [],
+        hideSearch: true,
+      },
+      slots: {
+        actions: leftContent?.children?.map((child: any) => this.parseNode(child)).filter(Boolean) || [],
       }
     }
   }
