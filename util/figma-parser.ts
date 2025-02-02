@@ -582,6 +582,20 @@ export class FigmaParser {
     const paginationContainer = this.findNodeByName(node.children || [], '.Pagination')
     const paginationProps = paginationContainer?.componentProperties || {}
 
+    // Preparar los slots de celdas
+    const rowCellSlots: Record<string, any> = {}
+    tableRows.forEach((row: any, rowIndex: number) => {
+      const cells = row.children?.[0]?.children?.filter((child: any) => child.type === 'INSTANCE') || []
+      
+      cells.forEach((cell: any) => {
+        const textContainer = this.findNodeByName(cell.children, 'text-container')
+        if (textContainer?.children?.[0]) {
+          const slotKey = `rowCell(${rowIndex},${cell.name})`
+          rowCellSlots[slotKey] = this.parseNode(textContainer.children[0])
+        }
+      })
+    })
+
     return {
       name: 'STable',
       type: 'COMPONENT',
@@ -593,6 +607,7 @@ export class FigmaParser {
       },
       slots: {
         toolbar: [this.parseNode(node.children[0])],
+        ...rowCellSlots
       }
     }
   }
