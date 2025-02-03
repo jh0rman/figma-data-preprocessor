@@ -1,93 +1,21 @@
-import colors from 'tailwindcss/colors'
-
-// Extender colors con los colores de Simón
-const customColors = {
-  'sm-primary': {
-    '50': '#e9fafa',
-    '100': '#cff2f1',
-    '200': '#b6ecea',
-    '300': '#9be4e0',
-    '400': '#72d5d1',
-    '500': '#30bbb7',
-    '600': '#30aba9',
-    '700': '#299e9c',
-    '800': '#208d8d',
-    '900': '#1a7e7f'
-  }
-} as const
-
-const extendedColors = {
-  ...colors,
-  ...customColors
-}
+import { ColorParser } from '../utils/color-parser'
+import { extendedColors } from '../constants/colors'
 
 export class FigmaParser {
   private readonly DEFAULT_FONT = 'Inter'
-  private readonly colorTokenMap: Map<string, { name: string, shade: string }> = new Map()
-  private readonly DEPRECATED_COLORS = ['lightBlue', 'warmGray', 'trueGray', 'coolGray', 'blueGray']
+  private readonly colorParser: ColorParser
 
   document: Record<string, any>
   rootNodes: Record<string, any>[]
   prototypeStartNodeID: string | undefined
 
   constructor(private file: Record<string, any>) {
-    this.initializeColorTokenMap()
+    this.colorParser = new ColorParser(extendedColors)
     
     this.document = this.filterVisibleNodes(this.file.document)
     const canvasNodes = this.document.children || []
     this.rootNodes = canvasNodes[0]?.children || []
     this.prototypeStartNodeID = canvasNodes[1]?.prototypeStartNodeID
-  }
-
-  private initializeColorTokenMap() {
-    const colorNames = Object.keys(extendedColors)
-      .filter(name => 
-        !this.DEPRECATED_COLORS.includes(name) &&
-        typeof extendedColors[name as keyof typeof extendedColors] === 'object' &&
-        !Array.isArray(extendedColors[name as keyof typeof extendedColors])
-      )
-
-    colorNames.forEach(name => {
-      const colorShades = extendedColors[name as keyof typeof extendedColors]
-      Object.entries(colorShades).forEach(([shade, hexColor]) => {
-        if (typeof hexColor === 'string') {
-          const rgb = this.hexToRgb(hexColor)
-          if (rgb) {
-            const key = this.rgbToKey(rgb)
-            this.colorTokenMap.set(key, { name, shade })
-          }
-        }
-      })
-    })
-  }
-
-  private hexToRgb(hex: string): { r: number, g: number, b: number } | null {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
-    return result ? {
-      r: parseInt(result[1], 16) / 255,
-      g: parseInt(result[2], 16) / 255,
-      b: parseInt(result[3], 16) / 255
-    } : null
-  }
-
-  private rgbToKey(color: { r: number, g: number, b: number }): string {
-    return `${Math.round(color.r * 255)},${Math.round(color.g * 255)},${Math.round(color.b * 255)}`
-  }
-
-  private findExactColorToken(color: { r: number, g: number, b: number, a?: number }): string | null {
-    // Manejar colores especiales primero
-    if (color.a === 0) return 'transparent'
-    
-    const rgb = this.rgbToKey(color)
-    
-    // Manejar black y white
-    if (rgb === '0,0,0') return 'black'
-    if (rgb === '255,255,255') return 'white'
-
-    // Buscar en el mapa de colores personalizados
-    return this.colorTokenMap.has(rgb) 
-      ? `${this.colorTokenMap.get(rgb)!.name}-${this.colorTokenMap.get(rgb)!.shade}`
-      : null
   }
 
   getStartNodeID(): string | undefined {
@@ -208,7 +136,7 @@ export class FigmaParser {
 
     // Background
     if (node.backgroundColor) {
-      const colorToken = this.findExactColorToken(node.backgroundColor)
+      const colorToken = this.colorParser.findExactColorToken(node.backgroundColor)
       if (colorToken) {
         if (colorToken !== 'transparent') {
           styles.backgroundColor = colorToken
@@ -235,7 +163,7 @@ export class FigmaParser {
     if (node.strokes && node.strokes.length > 0) {
       const stroke = node.strokes[0]
       if (stroke.type === 'SOLID') {
-        const colorToken = this.findExactColorToken(stroke.color)
+        const colorToken = this.colorParser.findExactColorToken(stroke.color)
         if (colorToken) {
           styles.border = `1px solid ${colorToken}`
         } else {
@@ -250,7 +178,7 @@ export class FigmaParser {
       const shadows = node.effects
         .filter((effect: any) => effect.type === 'DROP_SHADOW')
         .map((effect: any) => {
-          const colorToken = this.findExactColorToken(effect.color)
+          const colorToken = this.colorParser.findExactColorToken(effect.color)
           if (colorToken) {
             return `${effect.offset.x}px ${effect.offset.y}px ${effect.radius}px ${colorToken}`
           } else {
@@ -429,7 +357,7 @@ export class FigmaParser {
 
     // Agregar color si existe
     if (fills[0]?.color) {
-      const colorToken = this.findExactColorToken(fills[0].color)
+      const colorToken = this.colorParser.findExactColorToken(fills[0].color)
       if (colorToken) {
         styles.color = colorToken
       } else {
