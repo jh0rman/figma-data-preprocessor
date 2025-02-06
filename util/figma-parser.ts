@@ -1,19 +1,20 @@
 import { ColorParser } from '../utils/color-parser'
+import { NodeFinder, type FigmaNode } from '../utils/node-finder'
 import { extendedColors } from '../constants/colors'
 
 export class FigmaParser {
   private readonly DEFAULT_FONT = 'Inter'
   private readonly colorParser: ColorParser
 
-  document: Record<string, any>
-  rootNodes: Record<string, any>[]
+  document: FigmaNode | null
+  rootNodes: FigmaNode[]
   prototypeStartNodeID: string | undefined
 
   constructor(private file: Record<string, any>) {
     this.colorParser = new ColorParser(extendedColors)
     
-    this.document = this.filterVisibleNodes(this.file.document)
-    const canvasNodes = this.document.children || []
+    this.document = NodeFinder.filterVisibleNodes(this.file.document)
+    const canvasNodes = this.document?.children || []
     this.rootNodes = canvasNodes[0]?.children || []
     this.prototypeStartNodeID = canvasNodes[1]?.prototypeStartNodeID
   }
@@ -22,40 +23,11 @@ export class FigmaParser {
     return this.prototypeStartNodeID
   }
 
-  getNodeByID(nodeId: string): any | null {
-    return this.searchNode(this.document, nodeId)
-  }
-
-  private searchNode(node: any, nodeId: string): any | null {
-    if (!node) return null
-    if (node.id === nodeId) return node
-
-    if (node.children) {
-      for (const child of node.children) {
-        const result = this.searchNode(child, nodeId)
-        if (result) return result
-      }
-    }
-    return null
-  }
-
-  filterVisibleNodes(node: any): any | null {
-    if (!node || node.visible === false) return null
-
-    if (node.children) {
-      node.children = node.children
-        .map((child: any) => this.filterVisibleNodes(child))
-        .filter(Boolean)
-    }
-
-    return node
-  }
-
   parseNodes(): any[] {
-    return this.rootNodes.map((node) => this.parseNode(node)).filter(Boolean)
+    return NodeFinder.mapNodes(this.rootNodes, this.parseNode.bind(this))
   }
 
-  parseNode(node: Record<string, any>): any | null {
+  parseNode(node: FigmaNode): any | null {
     let element: Record<string, any> = {}
 
     switch (node.type) {
@@ -233,51 +205,10 @@ export class FigmaParser {
     }
   }
 
-  private findNodeByName(nodes: any[], nodeName: string): any | undefined {
-    for (const node of nodes) {
-      if (node.name === nodeName) {
-        return node
-      }
-      if (node.children) {
-        const result = this.findNodeByName(node.children, nodeName)
-        if (result) return result
-      }
-    }
-    return undefined
-  }
-
-  private findNodesByName(nodes: any[], nodeName: string): any[] {
-    let results: any[] = []
-    
-    for (const node of nodes) {
-      if (node.name === nodeName) {
-        results.push(node)
-      }
-      if (node.children) {
-        results = results.concat(this.findNodesByName(node.children, nodeName))
-      }
-    }
-    
-    return results
-  }
-
-  private findNodeByComponentId(nodes: any[], nodeId: string): any | undefined {
-    for (const node of nodes) {
-      if (node.componentId === nodeId) {
-        return node
-      }
-      if (node.children) {
-        const result = this.findNodeByComponentId(node.children, nodeId)
-        if (result) return result
-      }
-    }
-    return undefined
-  }
-
   private extractPageHeadingData(node: Record<string, any>): any {
     const props = node.componentProperties || {}
 
-    const actionsContainer = this.findNodeByName(node.children || [], '.buttons-heading')    
+    const actionsContainer = NodeFinder.findNodeByName(node.children || [], '.buttons-heading')
 
     return {
       name: 'SPageHeading',
@@ -316,11 +247,11 @@ export class FigmaParser {
     }
 
     const iconLeftNode = props['Leading Icon#4089:5']?.value 
-      ? this.findNodeByComponentId(node.children || [], props['Change leading#4089:18']?.value)
+      ? NodeFinder.findNodeByComponentId(node.children || [], props['Change leading#4089:18']?.value)
       : undefined
 
     const iconRightNode = props['Trailing Icon#4089:31']?.value 
-      ? this.findNodeByComponentId(node.children || [], props['Change trailing#4089:44']?.value)
+      ? NodeFinder.findNodeByComponentId(node.children || [], props['Change trailing#4089:44']?.value)
       : undefined
       // iconLeft: props['Leading Icon#4089:5']?.value ? props['Change leading#4089:18']?.value : undefined,
       // iconRight: props['Trailing Icon#4089:31']?.value ? props['Change trailing#4089:44']?.value : undefined,
@@ -377,17 +308,17 @@ export class FigmaParser {
   private extractEmptyStateData(node: Record<string, any>): any {
     const props = node.componentProperties || {}
 
-    const actionButton = this.findNodeByName(node.children || [], '.empty-state-actions')?.children?.[0]
+    const actionButton = NodeFinder.findNodeByName(node.children || [], '.empty-state-actions')?.children?.[0]
     const actionLabel = actionButton?.componentProperties?.['Label#4090:4']?.value
     const generalIcon = props['Icon#4470:25']?.value
-      ? this.findNodeByComponentId(node.children || [], props['Icon:#4470:20']?.value)
+      ? NodeFinder.findNodeByComponentId(node.children || [], props['Icon:#4470:20']?.value)
       : undefined
 
     const onClickInteraction = actionButton?.interactions?.find(
       (interaction: any) => interaction.trigger?.type === 'ON_CLICK'
     )
     const destinationId = onClickInteraction?.actions?.[0]?.destinationId
-    const destinationNode = destinationId ? this.getNodeByID(destinationId) : undefined
+    const destinationNode = destinationId ? NodeFinder.findNodeById(this.document, destinationId) : undefined
 
     return {
       name: 'SEmptyState',
@@ -411,9 +342,9 @@ export class FigmaParser {
   private extractModalData(node: Record<string, any>): any {
     const props = node.componentProperties || {}
     
-    const defaultSlot = this.findNodeByName(node.children || [], 'Slot')?.children
-    const footerLeftContent = this.findNodeByName(node.children || [], 'Left content')?.children
-    const footerRightContent = this.findNodeByName(node.children || [], 'Right content')?.children
+    const defaultSlot = NodeFinder.findNodeByName(node.children || [], 'Slot')?.children
+    const footerLeftContent = NodeFinder.findNodeByName(node.children || [], 'Left content')?.children
+    const footerRightContent = NodeFinder.findNodeByName(node.children || [], 'Right content')?.children
 
     return {
       name: 'SModal',
@@ -478,7 +409,7 @@ export class FigmaParser {
     const props = node.componentProperties || {}
 
     // Extraer configuración de columnas del header
-    const headerContainer = this.findNodeByName(node.children || [], '.Table row header')?.children?.[0]
+    const headerContainer = NodeFinder.findNodeByName(node.children || [], '.Table row header')?.children?.[0]
     const headerCells = headerContainer?.children?.filter((child: any) => child.type === 'INSTANCE') || []
 
     const columnConfig = headerCells.map((headerCell: any) => {
@@ -494,20 +425,20 @@ export class FigmaParser {
     })
 
     // Extraer datos de las filas
-    const tableRows = this.findNodesByName(node.children || [], '.Table row')
+    const tableRows = NodeFinder.findNodesByName(node.children || [], '.Table row')
     const rows = tableRows.map((row: any) => {
       const rowData: Record<string, any> = {}
       const cells = row.children?.[0]?.children?.filter((child: any) => child.type === 'INSTANCE') || []
       
       cells.forEach((cell: any) => {
-        const textContainer = this.findNodeByName(cell.children, 'text-container')
+        const textContainer = NodeFinder.findNodeByName(cell.children, 'text-container')
         rowData[cell.name] = textContainer?.children?.[0].characters
       })
       return rowData
     })
 
     // Extraer información de paginación
-    const paginationContainer = this.findNodeByName(node.children || [], '.Pagination')
+    const paginationContainer = NodeFinder.findNodeByName(node.children || [], '.Pagination')
     const paginationProps = paginationContainer?.componentProperties || {}
 
     // Preparar los slots de celdas
@@ -516,7 +447,7 @@ export class FigmaParser {
       const cells = row.children?.[0]?.children?.filter((child: any) => child.type === 'INSTANCE') || []
       
       cells.forEach((cell: any) => {
-        const textContainer = this.findNodeByName(cell.children, 'text-container')
+        const textContainer = NodeFinder.findNodeByName(cell.children, 'text-container')
         if (textContainer?.children?.[0]) {
           const slotKey = `rowCell(${rowIndex},${cell.name})`
           rowCellSlots[slotKey] = this.parseNode(textContainer.children[0])
@@ -543,7 +474,7 @@ export class FigmaParser {
   private extractToolbarData(node: Record<string, any>): any {
     const props = node.componentProperties || {}
     
-    const leftContent = this.findNodeByName(node.children || [], 'Left content')
+    const leftContent = NodeFinder.findNodeByName(node.children || [], 'Left content')
 
     return {
       name: 'SToolbar',

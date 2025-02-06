@@ -1,5 +1,6 @@
 import { FigmaAPI } from './api/figma'
 import { FigmaParser } from './util/figma-parser'
+import { NodeFinder } from './utils/node-finder'
 
 (async () => {
   const figmaApi = new FigmaAPI(Bun.env.FIGMA_TOKEN)
@@ -17,7 +18,7 @@ import { FigmaParser } from './util/figma-parser'
   // }
   
   // const startNodeData = await figmaApi.getFile(FIGMA_FILE_KEY, { ids: '365:28499' })
-  let result = parser.getNodeByID('388:50018')
-  result = parser.parseNode(result.children[1].children[1].children[1])
+  let result = NodeFinder.findNodeById(parser.document, '388:50018')
+  result = parser.parseNode(result?.children?.[1]?.children?.[1].children?.[1]!)
   Bun.write('start-node.json', JSON.stringify(result, null, 2))
 })()
