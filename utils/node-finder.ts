@@ -112,4 +112,4 @@ export class NodeFinder {
       .map(node => transform(node))
       .filter((result): result is T => result !== null)
   }
-} 
+}

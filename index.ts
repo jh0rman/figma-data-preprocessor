@@ -1,5 +1,5 @@
 import { FigmaAPI } from './api/figma'
-import { FigmaParser } from './util/figma-parser'
+import { FigmaParser } from './utils/figma-parser'
 import { NodeFinder } from './utils/node-finder'
 
 (async () => {

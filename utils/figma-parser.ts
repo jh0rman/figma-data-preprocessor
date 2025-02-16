@@ -1,5 +1,5 @@
-import { ColorParser } from '../utils/color-parser'
-import { NodeFinder, type FigmaNode } from '../utils/node-finder'
+import { ColorParser } from './color-parser'
+import { NodeFinder, type FigmaNode } from './node-finder'
 import { extendedColors } from '../constants/colors'
 
 export class FigmaParser {
